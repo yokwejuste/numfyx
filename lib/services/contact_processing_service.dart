@@ -1,5 +1,4 @@
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:flutter/foundation.dart';
 import '../models/contact_result.dart';
 import 'phone_formatter_service.dart';
 
@@ -30,12 +29,6 @@ class ContactProcessingService {
     int processed = 0;
 
     for (final contact in contacts) {
-      if (!kIsWeb && !contact.exists) {
-        processed++;
-        onProgress?.call(total > 0 ? processed / total : 1.0);
-        continue;
-      }
-
       final name = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
       if (contact.phones.isEmpty) {
         processed++;
@@ -103,12 +96,6 @@ class ContactProcessingService {
     int failed = 0;
 
     for (final contact in contacts) {
-      if (!kIsWeb && !contact.exists) {
-        processed++;
-        onProgress?.call(totalContacts > 0 ? processed / totalContacts : 1.0);
-        continue;
-      }
-
       final contactName = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
       if (contact.phones.isEmpty) {
         skipped++;
@@ -191,4 +178,3 @@ class ContactProcessingService {
     return ProcessingResult(results: results, totalProcessed: contacts.length, updated: updated, skipped: skipped, failed: failed);
   }
 }
-

@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import '../models/contact_result.dart';
+import '../services/contact_processing_service.dart';
+import '../services/excel_service.dart';
 import '../services/phone_formatter_service.dart';
 import '../services/settings_service.dart';
-import '../services/excel_service.dart';
-import '../models/contact_result.dart';
 import '../widgets/buttons.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -84,24 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  String _maskPhoneNumber(String phoneNumber) {
-    if (phoneNumber.length < 8) return phoneNumber;
-    final start = phoneNumber.substring(0, 4);
-    final end = phoneNumber.substring(phoneNumber.length - 2);
-    return '$start${"x" * (phoneNumber.length - 6)}$end';
-  }
-
-  String _abbreviateName(String fullName) {
-    final parts = fullName.trim().split(' ');
-    if (parts.length == 1) return parts[0];
-    final first = parts[0];
-    final rest = parts
-        .sublist(1)
-        .map((p) => p.isNotEmpty ? '${p[0]}.' : '')
-        .join(' ');
-    return '$first ${rest.trim()}';
-  }
-
   Future<void> _previewAndConfirmProcessing() async {
     if (!_hasPermission) {
       await _requestPermission();
@@ -124,34 +108,54 @@ class _HomeScreenState extends State<HomeScreen> {
 
     List<Contact> contacts;
     try {
-      contacts = await FlutterContacts.getContacts(withProperties: true, withPhoto: false, withAccounts: false);
+      contacts = await FlutterContacts.getContacts(
+        withProperties: true,
+        withPhoto: false,
+        withAccounts: false,
+      );
+
+      final preview = await ContactProcessingService.computePreview(
+        contacts,
+        _currentRegion,
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+
+      final skip = await Navigator.of(context).push<Set<String>?>(
+        MaterialPageRoute(
+          builder: (_) => _PreviewScreen(
+            contacts: contacts,
+            region: _currentRegion,
+            servicePreview: preview,
+          ),
+        ),
+      );
+      if (skip != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _processContacts(contacts, skip);
+        });
+      }
+      return;
     } catch (e) {
       if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      _addLog('Error loading contacts: ${e.toString()}');
+      _addLog('Error loading/previewing contacts: ${e.toString()}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load contacts: ${e.toString()}'),
+            content: Text('Failed to load/preview contacts: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
       return;
     }
-
-    if (mounted) Navigator.of(context, rootNavigator: true).pop();
-    if (!mounted) return;
-
-    final result = await Navigator.of(context).push<dynamic>(
-      MaterialPageRoute(builder: (_) => _PreviewScreen(contacts: contacts, region: _currentRegion)),
-    );
-
-    if (result is Set<String>) {
-      await _processContacts(contacts, result);
-    }
   }
 
-  Future<void> _processContacts([List<Contact>? contactsParam, Set<String>? skipSet]) async {
+  Future<void> _processContacts([
+    List<Contact>? contactsParam,
+    Set<String>? skipSet,
+  ]) async {
     if (!_hasPermission) {
       await _requestPermission();
       return;
@@ -176,190 +180,35 @@ class _HomeScreenState extends State<HomeScreen> {
     _addLog('Starting contact processing...');
     _addLog('Using region: $_currentRegion');
     try {
-      final contacts = contactsParam ?? await FlutterContacts.getContacts(
-        withProperties: true,
-        withPhoto: true,
-        withAccounts: true,
-      );
-
-      _totalContacts = contacts.length;
-
-      if (_totalContacts == 0) {
-        setState(() {
-          _statusMessage = 'No contacts found';
-          _isProcessing = false;
-        });
-        _addLog('No contacts found on device');
-        return;
-      }
-
-      _addLog('Loaded $_totalContacts contacts');
-
-      setState(() {
-        _statusMessage = 'Processing $_totalContacts contacts...';
-      });
-
-      int processedContacts = 0;
-
-      for (final contact in contacts) {
-        final contactName = contact.displayName.isNotEmpty
-            ? contact.displayName
-            : 'Unknown';
-
-        if (contact.phones.isEmpty) {
-          _contactsWithoutPhones++;
-          final displayName = _abbreviateName(contactName);
-          _addLog('Skipped: $displayName (no phone numbers)');
-          processedContacts++;
-          setState(() {
-            _progress = processedContacts / _totalContacts;
-          });
-          continue;
-        }
-
-        bool contactModified = false;
-        int numbersInContact = contact.phones.length;
-        final displayName = _abbreviateName(contactName);
-
-        if (numbersInContact > 1) {
-          _addLog('$displayName has $numbersInContact phone numbers');
-        }
-
-        for (int i = 0; i < contact.phones.length; i++) {
-          _scannedNumbers++;
-
-          final phone = contact.phones[i];
-          final originalNumber = phone.number.trim();
-          final key = '${contact.id}|$originalNumber';
-          if (!PhoneFormatterService.isNumberFromRegion(originalNumber, _currentRegion)) {
-            _skippedNumbers++;
-            _results.add(ContactResult(contactName: contactName, originalNumber: originalNumber, finalNumber: originalNumber, status: 'Skipped (other country)'));
-            continue;
-          }
-          if (skipSet != null && skipSet.contains(key)) {
-            _skippedNumbers++;
-            _results.add(ContactResult(contactName: contactName, originalNumber: originalNumber, finalNumber: originalNumber, status: 'Skipped (user opted out)'));
-            continue;
-          }
-
-          if (originalNumber.isEmpty || originalNumber.length < 4) {
-            _skippedNumbers++;
-            _results.add(
-              ContactResult(
-                contactName: contactName,
-                originalNumber: originalNumber,
-                finalNumber: originalNumber,
-                status: 'Skipped (too short)',
-              ),
-            );
-            continue;
-          }
-
-          if (originalNumber.startsWith('+')) {
-            _skippedNumbers++;
-            _results.add(
-              ContactResult(
-                contactName: contactName,
-                originalNumber: originalNumber,
-                finalNumber: originalNumber,
-                status: 'Skipped (already E.164)',
-              ),
-            );
-            continue;
-          }
-
-          if (originalNumber.startsWith('00')) {
-            final convertedNumber = '+${originalNumber.substring(2)}';
-            contact.phones[i] = Phone(
-              convertedNumber,
-              label: phone.label,
-              customLabel: phone.customLabel,
-              isPrimary: phone.isPrimary,
-            );
-            contactModified = true;
-            _updatedNumbers++;
-            _results.add(
-              ContactResult(
-                contactName: contactName,
-                originalNumber: originalNumber,
-                finalNumber: convertedNumber,
-                status: 'Updated',
-              ),
-            );
-            _addLog(
-              'Updated: $displayName - ${_maskPhoneNumber(originalNumber)} -> ${_maskPhoneNumber(convertedNumber)}',
-            );
-            continue;
-          }
-
-          final formattedNumber = await PhoneFormatterService.formatToE164(
-            originalNumber,
-            _currentRegion,
+      final contacts =
+          contactsParam ??
+          await FlutterContacts.getContacts(
+            withProperties: true,
+            withPhoto: true,
+            withAccounts: true,
           );
 
-          if (formattedNumber != null && formattedNumber != originalNumber) {
-            contact.phones[i] = Phone(
-              formattedNumber,
-              label: phone.label,
-              customLabel: phone.customLabel,
-              isPrimary: phone.isPrimary,
-            );
-            contactModified = true;
-            _updatedNumbers++;
-            _results.add(
-              ContactResult(
-                contactName: contactName,
-                originalNumber: originalNumber,
-                finalNumber: formattedNumber,
-                status: 'Updated',
-              ),
-            );
-            _addLog(
-              'Updated: $displayName - ${_maskPhoneNumber(originalNumber)} -> ${_maskPhoneNumber(formattedNumber)}',
-            );
-          } else {
-            _failedNumbers++;
-            _results.add(
-              ContactResult(
-                contactName: contactName,
-                originalNumber: originalNumber,
-                finalNumber: originalNumber,
-                status: 'Failed (invalid)',
-              ),
-            );
-            _addLog(
-              'FAILED: $displayName - ${_maskPhoneNumber(originalNumber)} (invalid number)',
-            );
-          }
-        }
-
-        if (contactModified) {
-          try {
-            await contact.update();
-            _addLog('Saved: $displayName');
-          } catch (e) {
-            _addLog('ERROR saving $displayName: ${e.toString()}');
-            debugPrint('ERROR saving $displayName: ${e.toString()}');
-          }
-        }
-
-        processedContacts++;
-        setState(() {
-          _progress = processedContacts / _totalContacts;
-          _statusMessage = 'Processing... $_updatedNumbers updated';
-        });
-      }
+      final result = await ContactProcessingService.processContacts(
+        contacts,
+        _currentRegion,
+        skipSet: skipSet,
+        onProgress: (p) => setState(() {
+          _progress = p;
+        }),
+        onLog: (m) => _addLog(m),
+      );
 
       setState(() {
-        _statusMessage = 'Completed successfully';
         _isProcessing = false;
         _progress = 1.0;
+        _statusMessage = 'Completed successfully';
+        _results.clear();
+        _results.addAll(result.results);
+        _totalContacts = result.totalProcessed;
+        _updatedNumbers = result.updated;
+        _skippedNumbers = result.skipped;
+        _failedNumbers = result.failed;
       });
-
-      _addLog('Processing complete');
-      _addLog(
-        'Updated: $_updatedNumbers | Skipped: $_skippedNumbers | Failed: $_failedNumbers',
-      );
 
       HomeScreen.lastResults = List.from(_results);
       _addLog('Processing complete. Generate report from Settings.');
@@ -393,7 +242,9 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('No processing results available. Process contacts first.'),
+            content: const Text(
+              'No processing results available. Process contacts first.',
+            ),
             backgroundColor: Theme.of(context).colorScheme.primary,
             duration: const Duration(seconds: 3),
           ),
@@ -402,44 +253,59 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    setState(() { _isGenerating = true; });
+    setState(() {
+      _isGenerating = true;
+    });
     showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (_) => const Center(
-        child: SizedBox(width: 64, height: 64, child: CircularProgressIndicator()),
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: CircularProgressIndicator(),
+        ),
       ),
     );
 
-    final path = await ExcelService.exportResults(_results);
+    String? path;
+    try {
+      path = await ExcelService.exportResults(_results);
+    } catch (e) {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      setState(() {
+        _isGenerating = false;
+      });
+      _addLog('Failed to generate report: ${e.toString()}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to generate report: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      setState(() {
+        _isGenerating = false;
+      });
+    }
 
-    if (mounted) Navigator.of(context, rootNavigator: true).pop();
-    setState(() { _isGenerating = false; });
     if (!mounted) return;
     final theme = Theme.of(context);
     if (path != null) {
+      _addLog('Report saved to $path');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('PDF saved: ${path.split('/').last}'),
+          content: Text('Report saved: ${path.split('/').last}'),
           backgroundColor: theme.colorScheme.primary,
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
             label: 'Open',
             textColor: Colors.white,
-            onPressed: () async {
-              final uri = Uri.file(path);
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri);
-              } else {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Unable to open file'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
+            onPressed: () { _openFile(path); },
           ),
         ),
       );
@@ -449,6 +315,38 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Text('Failed to generate PDF report'),
           backgroundColor: Colors.red,
           duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openFile(String filePath) async {
+    try {
+      final uri = Uri.file(filePath);
+      // Try launching externally; some platforms may not support canLaunch for file URIs
+      try {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      } catch (_) {
+        // fallback to plain launch
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri);
+          return;
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open file'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to open file: ${e.toString()}'),
+          backgroundColor: Colors.red,
         ),
       );
     }
@@ -768,22 +666,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// PreviewScreen and helpers
 class _PreviewItem {
   final String contactId;
   final String contactName;
   final String original;
   final String predicted;
-  String status; // 'Will Update' | 'Will Skip' | 'Will Fail'
+  String status;
   bool selected;
 
-  _PreviewItem({required this.contactId, required this.contactName, required this.original, required this.predicted, required this.status, this.selected = true});
+  _PreviewItem({
+    required this.contactId,
+    required this.contactName,
+    required this.original,
+    required this.predicted,
+    required this.status,
+    this.selected = true,
+  });
 }
 
 class _PreviewScreen extends StatefulWidget {
   final List<Contact> contacts;
   final String region;
-  const _PreviewScreen({required this.contacts, required this.region});
+  final List<ServicePreviewItem>? servicePreview;
+
+  const _PreviewScreen({
+    required this.contacts,
+    required this.region,
+    this.servicePreview,
+  });
 
   @override
   State<_PreviewScreen> createState() => _PreviewScreenState();
@@ -810,11 +720,32 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     final totalContacts = contacts.length;
     int processed = 0;
 
+    if (widget.servicePreview != null) {
+      for (final sp in widget.servicePreview!) {
+        _items.add(
+          _PreviewItem(
+            contactId: sp.contactId,
+            contactName: sp.contactName,
+            original: sp.original,
+            predicted: sp.predicted,
+            status: sp.status,
+            selected: sp.status == 'Will Update',
+          ),
+        );
+      }
+      setState(() {
+        _progress = 1.0;
+        _isWorking = false;
+      });
+      return;
+    }
+
     for (final contact in contacts) {
       if (!mounted) return;
-      final name = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
+      final name = contact.displayName.isNotEmpty
+          ? contact.displayName
+          : 'Unknown';
       if (contact.phones.isEmpty) {
-        // nothing to add but update progress
         processed++;
         setState(() {
           _progress = processed / totalContacts;
@@ -845,7 +776,10 @@ class _PreviewScreenState extends State<_PreviewScreen> {
             predicted = '+$without00';
           }
         } else {
-          final matches = PhoneFormatterService.matchesCountryStructure(orig, widget.region);
+          final matches = PhoneFormatterService.matchesCountryStructure(
+            orig,
+            widget.region,
+          );
           if (!matches) {
             status = 'Will Fail';
             predicted = 'invalid structure';
@@ -854,7 +788,10 @@ class _PreviewScreenState extends State<_PreviewScreen> {
               status = 'Will Update';
               predicted = 'will attempt E.164';
             } else {
-              final formatted = await PhoneFormatterService.formatToE164(orig, widget.region);
+              final formatted = await PhoneFormatterService.formatToE164(
+                orig,
+                widget.region,
+              );
               if (formatted != null && formatted != orig) {
                 status = 'Will Update';
                 predicted = formatted;
@@ -867,7 +804,16 @@ class _PreviewScreenState extends State<_PreviewScreen> {
         }
 
         final cid = contact.id;
-        _items.add(_PreviewItem(contactId: cid, contactName: name, original: orig, predicted: predicted, status: status, selected: status == 'Will Update'));
+        _items.add(
+          _PreviewItem(
+            contactId: cid,
+            contactName: name,
+            original: orig,
+            predicted: predicted,
+            status: status,
+            selected: status == 'Will Update',
+          ),
+        );
       }
 
       processed++;
@@ -875,7 +821,6 @@ class _PreviewScreenState extends State<_PreviewScreen> {
         setState(() {
           _progress = processed / totalContacts;
         });
-        // allow UI to update
         await Future.delayed(Duration(milliseconds: 1));
       }
     }
@@ -894,7 +839,13 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     }
     if (_search.trim().isNotEmpty) {
       final q = _search.toLowerCase();
-      list = list.where((i) => i.contactName.toLowerCase().contains(q) || i.original.toLowerCase().contains(q)).toList();
+      list = list
+          .where(
+            (i) =>
+                i.contactName.toLowerCase().contains(q) ||
+                i.original.toLowerCase().contains(q),
+          )
+          .toList();
     }
     return list;
   }
@@ -906,6 +857,9 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     final end = (_page + 1) * _pageSize;
     final pageItems = _filteredItems.skip(start).take(_pageSize).toList();
 
+    final allFilteredSelected =
+        _filteredItems.isNotEmpty && _filteredItems.every((i) => i.selected);
+
     return Scaffold(
       appBar: AppBar(title: const Text('Preview Changes')),
       body: Padding(
@@ -914,14 +868,21 @@ class _PreviewScreenState extends State<_PreviewScreen> {
           children: [
             Row(
               children: [
-                Expanded(child: Text('Items: ${_items.length}  Filter: $_filter')),
+                Expanded(
+                  child: Text('Items: ${_items.length}  Filter: $_filter'),
+                ),
                 if (_isWorking)
                   SizedBox(
                     width: 160,
                     child: LinearProgressIndicator(value: _progress),
                   )
                 else
-                  Text('Ready', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                  Text(
+                    'Ready',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -929,7 +890,9 @@ class _PreviewScreenState extends State<_PreviewScreen> {
               children: [
                 DropdownButton<String>(
                   value: _filter,
-                  items: ['All', 'Will Update', 'Will Skip', 'Will Fail'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                  items: ['All', 'Will Update', 'Will Skip', 'Will Fail']
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
                   onChanged: (v) {
                     if (v == null) return;
                     setState(() {
@@ -942,12 +905,24 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                 SizedBox(
                   width: 200,
                   child: TextField(
-                    decoration: const InputDecoration(hintText: 'Search name or number', isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
-                    onChanged: (v) => setState(() { _search = v; _page = 0; }),
+                    decoration: const InputDecoration(
+                      hintText: 'Search name or number',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 8,
+                      ),
+                    ),
+                    onChanged: (v) => setState(() {
+                      _search = v;
+                      _page = 0;
+                    }),
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text('Page: ${_page + 1} / ${(_filteredItems.length / _pageSize).ceil().clamp(1, 999999)}'),
+                Text(
+                  'Page: ${_page + 1} / ${(_filteredItems.length / _pageSize).ceil().clamp(1, 999999)}',
+                ),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
@@ -962,36 +937,80 @@ class _PreviewScreenState extends State<_PreviewScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
-                TextButton(onPressed: () { setState(() { for (final it in _filteredItems) {
-                  it.selected = true;
-                } }); }, child: const Text('Select All')),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      for (final it in _filteredItems) {
+                        it.selected = !allFilteredSelected;
+                      }
+                    });
+                  },
+                  child: Text(
+                    allFilteredSelected ? 'Unselect All' : 'Select All',
+                  ),
+                ),
                 const SizedBox(width: 8),
-                TextButton(onPressed: () { setState(() { for (final it in _filteredItems) {
-                  it.selected = false;
-                } }); }, child: const Text('Clear Selection')),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      for (final it in _filteredItems) {
+                        it.selected = false;
+                      }
+                    });
+                  },
+                  child: const Text('Clear Selection'),
+                ),
                 const Spacer(),
                 Row(
                   children: [
                     const Text('Fast preview'),
-                    Switch(value: _fastPreview, onChanged: (v) { setState(() { _fastPreview = v; _items.clear(); _isWorking = true; _progress = 0.0; _computePreview(); }); }),
+                    Switch(
+                      value: _fastPreview,
+                      onChanged: (v) {
+                        setState(() {
+                          _fastPreview = v;
+                          _items.clear();
+                          _isWorking = true;
+                          _progress = 0.0;
+                          _computePreview();
+                        });
+                      },
+                    ),
                   ],
-                )
+                ),
               ],
             ),
             const SizedBox(height: 8),
             Expanded(
               child: pageItems.isEmpty
-                  ? Center(child: Text(_isWorking ? 'Computing preview...' : 'No items'))
+                  ? Center(
+                      child: Text(
+                        _isWorking ? 'Computing preview...' : 'No items',
+                      ),
+                    )
                   : ListView.builder(
                       itemCount: pageItems.length,
                       itemBuilder: (context, idx) {
                         final it = pageItems[idx];
                         return CheckboxListTile(
                           value: it.selected,
-                          onChanged: (v) { setState(() { it.selected = v ?? false; }); },
+                          onChanged: (v) {
+                            setState(() {
+                              it.selected = v ?? false;
+                            });
+                          },
                           title: Text(it.contactName),
                           subtitle: Text('${it.original} -> ${it.predicted}'),
-                          secondary: Text(it.status, style: TextStyle(color: it.status == 'Will Update' ? Colors.green : (it.status == 'Will Fail' ? Colors.red : Colors.grey))),
+                          secondary: Text(
+                            it.status,
+                            style: TextStyle(
+                              color: it.status == 'Will Update'
+                                  ? Colors.green
+                                  : (it.status == 'Will Fail'
+                                        ? Colors.red
+                                        : Colors.grey),
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -999,7 +1018,13 @@ class _PreviewScreenState extends State<_PreviewScreen> {
             const SizedBox(height: 8),
             Row(
               children: [
-                TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+                TextButton(
+                  onPressed: () {
+                    final navigator = Navigator.of(context);
+                    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) navigator.pop(null); });
+                  },
+                  child: const Text('Cancel'),
+                ),
                 const Spacer(),
                 ElevatedButton(
                   onPressed: _isWorking
@@ -1007,9 +1032,12 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                       : () {
                           final skip = <String>{};
                           for (final it in _items) {
-                            if (!it.selected) skip.add('${it.contactId}|${it.original}');
+                            if (!it.selected) {
+                              skip.add('${it.contactId}|${it.original}');
+                            }
                           }
-                          Navigator.of(context).pop(skip);
+                          final navigator = Navigator.of(context);
+                          WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) navigator.pop(skip); });
                         },
                   child: const Text('Confirm and Apply'),
                 ),
