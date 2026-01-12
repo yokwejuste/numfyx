@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/settings_service.dart';
 import '../services/excel_service.dart';
 import '../services/theme_service.dart';
@@ -16,6 +18,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   String _region = 'CM';
   bool _isSaving = false;
+  bool _isGenerating = false;
 
   final Map<String, String> _countries = {
     'CM': 'Cameroon',
@@ -87,37 +90,77 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Generating PDF report...'),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+    setState(() { _isGenerating = true; });
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(width: 64, height: 64, child: CircularProgressIndicator()),
+      ),
+    );
 
     final path = await ExcelService.exportResults(HomeScreen.lastResults);
 
-    if (mounted) {
-      final theme = Theme.of(context);
-      if (path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('PDF saved: ${path.split('/').last}'),
-            backgroundColor: theme.colorScheme.primary,
-            duration: const Duration(seconds: 3),
+    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    setState(() { _isGenerating = false; });
+
+    if (!mounted) return;
+    final theme = Theme.of(context);
+    if (path != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF saved: ${path.split('/').last}'),
+          backgroundColor: theme.colorScheme.primary,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Open',
+            textColor: Colors.white,
+            onPressed: () async {
+              final uri = Uri.file(path);
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri);
+              } else {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Unable to open file'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
           ),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to generate PDF report'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
+        ),
+      );
+    } else {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) {
+          return AlertDialog(
+            title: const Text('PDF generation failed'),
+            content: const Text('Could not generate the PDF. Check storage permission and available space.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  _downloadReport();
+                },
+                child: const Text('Retry'),
+              ),
+              if (kDebugMode)
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Check logs for details (debug).')));
+                  },
+                  child: const Text('Why failed'),
+                ),
+            ],
+          );
+        },
+      );
     }
   }
 
@@ -359,7 +402,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      onPressed: _downloadReport,
+                      onPressed: _isGenerating ? null : _downloadReport,
                       icon: const Icon(Icons.download, size: 18),
                       label: const Text('Download Report'),
                       style: ElevatedButton.styleFrom(

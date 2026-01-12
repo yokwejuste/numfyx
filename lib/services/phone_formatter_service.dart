@@ -16,6 +16,10 @@ class PhoneFormatterService {
         return null;
       }
 
+      if (!matchesCountryStructure(cleaned, region)) {
+        return null;
+      }
+
       String numberToValidate = cleaned;
       if (!cleaned.startsWith('+')) {
         final countryCode = _getCountryCode(region);
@@ -35,6 +39,58 @@ class PhoneFormatterService {
     } catch (e) {
       return null;
     }
+  }
+
+  static bool isNumberFromRegion(String phoneNumber, String region) {
+    if (phoneNumber.trim().isEmpty) return false;
+    final s = phoneNumber.trim();
+
+    final targetCode = _getCountryCode(region);
+
+    if (s.startsWith('+')) {
+      final digits = s.substring(1).replaceAll(RegExp(r'[^0-9]'), '');
+      return digits.startsWith(targetCode);
+    }
+
+    if (s.startsWith('00')) {
+      final digits = s.substring(2).replaceAll(RegExp(r'[^0-9]'), '');
+      return digits.startsWith(targetCode);
+    }
+
+    return true;
+  }
+
+  static bool matchesCountryStructure(String phoneNumber, String region) {
+    final digits = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+    final len = digits.length;
+
+    const ranges = {
+      'CM': [8, 9],
+      'FR': [9, 9],
+      'US': [10, 10],
+      'GB': [10, 10],
+      'DE': [10, 11],
+      'IT': [9, 10],
+      'ES': [9, 9],
+      'CA': [10, 10],
+      'NG': [10, 10],
+      'GH': [9, 9],
+      'KE': [9, 9],
+      'ZA': [9, 9],
+      'EG': [9, 9],
+      'MA': [9, 9],
+      'TN': [8, 8],
+      'DZ': [9, 9],
+      'CI': [8, 8],
+      'SN': [9, 9],
+    };
+
+    final range = ranges[region];
+    if (range != null) {
+      return len >= range[0] && len <= range[1];
+    }
+
+    return len >= 6 && len <= 12;
   }
 
   static String _getCountryCode(String region) {
@@ -92,6 +148,6 @@ class PhoneFormatterService {
       'SZ': '268',
       'KM': '269',
     };
-    return codes[region] ?? '237'; // Default to Cameroon
+    return codes[region] ?? '237';
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
@@ -16,19 +17,14 @@ class ExcelService {
     try {
       final pdf = pw.Document();
 
-      final updatedResults = results
-          .where((r) => r.status == 'Updated')
-          .toList();
-      final failedResults = results
-          .where((r) => r.status == 'Failed (invalid)')
-          .toList();
-      final skippedResults = results
-          .where((r) => r.status.startsWith('Skipped'))
-          .toList();
+      final allResults = results.toList();
+      final succeededResults = results.where((r) => r.status == 'Updated').toList();
+      final failedResults = results.where((r) => r.status.startsWith('Failed')).toList();
+      final skippedResults = results.where((r) => r.status.startsWith('Skipped')).toList();
 
       final summaryData = [
         ['Total Processed', '${results.length}'],
-        ['Updated', '${updatedResults.length}'],
+        ['Succeeded', '${succeededResults.length}'],
         ['Failed', '${failedResults.length}'],
         ['Skipped', '${skippedResults.length}'],
       ];
@@ -69,7 +65,7 @@ class ExcelService {
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(32),
           build: (pw.Context context) {
-            return [
+            final widgets = <pw.Widget>[
               pw.Header(
                 level: 0,
                 child: pw.Text(
@@ -107,41 +103,98 @@ class ExcelService {
                 ),
               ),
               pw.SizedBox(height: 20),
-              if (updatedResults.isNotEmpty) ...[
-                ...buildPage(
-                  updatedResults.take(100).toList(),
-                  'Updated Numbers (first 100)',
-                ),
-                pw.SizedBox(height: 20),
-              ],
-              if (failedResults.isNotEmpty) ...[
-                ...buildPage(failedResults, 'Failed Numbers'),
-                pw.SizedBox(height: 20),
-              ],
             ];
+
+            if (allResults.isNotEmpty) {
+              widgets.addAll(buildPage(allResults, 'All Results'));
+              widgets.add(pw.SizedBox(height: 20));
+            }
+
+            if (succeededResults.isNotEmpty) {
+              widgets.addAll(buildPage(succeededResults, 'Succeeded (Updated)'));
+              widgets.add(pw.SizedBox(height: 20));
+            }
+
+            if (failedResults.isNotEmpty) {
+              widgets.addAll(buildPage(failedResults, 'Failed Numbers'));
+              widgets.add(pw.SizedBox(height: 20));
+            }
+
+            if (skippedResults.isNotEmpty) {
+              widgets.addAll(buildPage(skippedResults, 'Skipped Numbers'));
+              widgets.add(pw.SizedBox(height: 20));
+            }
+
+            return widgets;
           },
         ),
       );
 
       Directory? directory;
       if (Platform.isAndroid) {
-        directory = Directory('/storage/emulated/0/Download');
+        try {
+          final exDirs = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+          if (exDirs != null && exDirs.isNotEmpty) {
+            directory = exDirs.first;
+          }
+        } catch (_) {}
+
+        directory ??= Directory('/storage/emulated/0/Download');
         if (!await directory.exists()) {
-          directory = await getExternalStorageDirectory();
+          try {
+            directory = await getExternalStorageDirectory();
+          } catch (_) {
+            directory = null;
+          }
         }
       } else {
-        directory = await getDownloadsDirectory();
+        try {
+          directory = await getDownloadsDirectory();
+        } catch (_) {
+          directory = null;
+        }
       }
 
       directory ??= await getApplicationDocumentsDirectory();
+
+      try {
+        if (!await directory.exists()) {
+          await directory.create(recursive: true);
+        }
+      } catch (e) {
+        debugPrint('Could not create directory ${directory.path}: $e');
+      }
 
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final filePath = '${directory.path}/numfyx_report_$timestamp.pdf';
 
       final file = File(filePath);
-      await file.writeAsBytes(await pdf.save());
-      return filePath;
+      try {
+        await file.create(recursive: true);
+        final bytes = await pdf.save();
+        await file.writeAsBytes(bytes, flush: true);
+        return filePath;
+      } catch (e, st) {
+        debugPrint('Failed to write PDF to $filePath: $e');
+        debugPrintStack(stackTrace: st);
+        try {
+          final fallbackDir = await getApplicationDocumentsDirectory();
+          final fallbackPath = '${fallbackDir.path}/numfyx_report_$timestamp.pdf';
+          final fallbackFile = File(fallbackPath);
+          await fallbackFile.create(recursive: true);
+          final bytes = await pdf.save();
+          await fallbackFile.writeAsBytes(bytes, flush: true);
+          debugPrint('Wrote PDF to fallback path $fallbackPath');
+          return fallbackPath;
+        } catch (e2, st2) {
+          debugPrint('Failed to write PDF to fallback location: $e2');
+          debugPrintStack(stackTrace: st2);
+          return null;
+        }
+      }
     } catch (e) {
+      debugPrint('PDF export error: $e');
+      debugPrintStack();
       return null;
     }
   }
