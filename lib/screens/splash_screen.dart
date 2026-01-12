@@ -90,7 +90,6 @@ class _SplashScreenState extends State<SplashScreen>
           ),
           child: Stack(
             children: [
-              // Main animation
               Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -133,7 +132,6 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
 
-              // Tap to continue text
               if (_showTapText)
                 Positioned(
                   bottom: 60,

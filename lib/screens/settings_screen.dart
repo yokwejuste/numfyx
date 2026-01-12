@@ -139,7 +139,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Theme Toggle
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -201,7 +200,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
 
-            // Default Region
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -301,7 +299,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 20),
 
-            // PDF Report
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -376,7 +373,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const Spacer(),
 
-            // About Section
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
