@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/excel_service.dart';
 import '../services/settings_service.dart';
@@ -142,7 +142,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final theme = Theme.of(context);
     final navigator = Navigator.of(context, rootNavigator: true);
 
-    final path = await ExcelService.exportResults(HomeScreen.lastResults, forcePdf: true);
+    final path = await ExcelService.exportResults(
+      HomeScreen.lastResults,
+      forcePdf: true,
+      onlyIncludeUpdated: true,
+    );
 
     if (mounted) navigator.pop();
     setState(() {
@@ -166,7 +170,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 await OpenFilex.open(path);
                 return;
               } catch (e) {
-                debugPrint('OpenFilex.open failed: $e; falling back to launchUrl');
+                debugPrint(
+                  'OpenFilex.open failed: $e; falling back to launchUrl',
+                );
               }
               try {
                 final uri = Uri.file(path);
@@ -489,9 +495,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           onPressed: _isGenerating
                               ? null
                               : () async {
-                                  final messenger = ScaffoldMessenger.of(context);
+                                  final messenger = ScaffoldMessenger.of(
+                                    context,
+                                  );
                                   final localTheme = Theme.of(context);
-                                  final navigator = Navigator.of(context, rootNavigator: true);
+                                  final navigator = Navigator.of(
+                                    context,
+                                    rootNavigator: true,
+                                  );
                                   if (HomeScreen.lastResults.isEmpty) {
                                     messenger.showSnackBar(
                                       SnackBar(
@@ -546,16 +557,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                               await OpenFilex.open(path);
                                               return;
                                             } catch (e) {
-                                              debugPrint('OpenFilex.open failed: $e; falling back to launchUrl');
+                                              debugPrint(
+                                                'OpenFilex.open failed: $e; falling back to launchUrl',
+                                              );
                                             }
                                             try {
                                               final uri = Uri.file(path);
                                               if (await canLaunchUrl(uri)) {
-                                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                                await launchUrl(
+                                                  uri,
+                                                  mode: LaunchMode
+                                                      .externalApplication,
+                                                );
                                                 return;
                                               }
                                             } catch (e) {
-                                              debugPrint('launchUrl fallback failed: $e');
+                                              debugPrint(
+                                                'launchUrl fallback failed: $e',
+                                              );
                                             }
 
                                             messenger.showSnackBar(

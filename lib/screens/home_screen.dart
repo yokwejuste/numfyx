@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/contact_result.dart';
 import '../services/contact_processing_service.dart';
@@ -280,7 +280,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     String? path;
     try {
-      path = await ExcelService.exportResults(_results, forcePdf: true);
+      path = await ExcelService.exportResults(
+        _results,
+        forcePdf: true,
+        onlyIncludeUpdated: true,
+      );
       debugPrint('exportResults returned path: $path');
     } catch (e) {
       setState(() {
@@ -375,7 +379,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     try {
-                      await Share.shareXFiles([XFile(savedPath)], text: 'NumFyx report');
+                      await Share.shareXFiles([
+                        XFile(savedPath),
+                      ], text: 'NumFyx report');
                     } catch (e) {
                       try {
                         await Share.share('Report: $savedPath');
