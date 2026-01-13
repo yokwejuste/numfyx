@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../services/excel_service.dart';
 import '../services/settings_service.dart';
@@ -150,9 +151,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (!mounted) return;
     if (path != null) {
+      final isPdf = path.toLowerCase().endsWith('.pdf');
+      final label = isPdf ? 'PDF saved' : 'CSV saved';
       messenger.showSnackBar(
         SnackBar(
-          content: Text('PDF saved: ${path.split('/').last}'),
+          content: Text('$label: ${path.split('/').last}'),
           backgroundColor: theme.colorScheme.primary,
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
@@ -173,6 +176,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
               } catch (e) {
                 debugPrint('launchUrl fallback failed: $e');
+              }
+              try {
+                await Share.shareXFiles([XFile(path)], text: 'NumFyx report');
+                return;
+              } catch (e) {
+                debugPrint('Share.shareXFiles failed: $e');
               }
 
               messenger.showSnackBar(

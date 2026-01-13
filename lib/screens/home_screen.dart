@@ -5,6 +5,7 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/contact_result.dart';
 import '../services/contact_processing_service.dart';
@@ -369,6 +370,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     _openFile(savedPath);
                   },
                   child: const Text('Open'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    try {
+                      await Share.shareXFiles([XFile(savedPath)], text: 'NumFyx report');
+                    } catch (e) {
+                      try {
+                        await Share.share('Report: $savedPath');
+                      } catch (_) {}
+                    }
+                  },
+                  child: const Text('Share'),
                 ),
               ],
             );
