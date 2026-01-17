@@ -1,6 +1,6 @@
 # NumFyx
 
-![numfyx UI](https://dev-to-uploads.s3.amazonaws.com/uploads/articles/pm6yollm9ffngomw4ile.png)
+![numfyx UI](https://dev-to-uploads.s3.amazonaws.com/uploads/articles/tr4jtpa7g58xr1knpdac.png)
 
 A simple, offline Flutter app that converts all phone numbers in your device contacts to international E.164 format.
 
