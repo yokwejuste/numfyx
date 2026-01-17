@@ -13,6 +13,16 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
+}
+
+val flutterVersionCode: Int? = localProperties.getProperty("flutter.versionCode")?.toIntOrNull()
+val flutterVersionName: String? = localProperties.getProperty("flutter.versionName")
+val applicationNameFromLocal: String? = localProperties.getProperty("applicationName")
+
 android {
     namespace = "com.yokwejuste.numfyx"
     compileSdk = flutter.compileSdkVersion
@@ -34,8 +44,13 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        // Use Flutter-provided values if present in local.properties, otherwise fall back to safe defaults
+        versionCode = flutterVersionCode ?: 1
+        versionName = flutterVersionName ?: "1.0"
+
+        // Provide manifest placeholders (do not hard-code values in the manifest)
+        manifestPlaceholders["applicationName"] = applicationNameFromLocal ?: "io.flutter.app.FlutterApplication"
+        manifestPlaceholders["appLabel"] = applicationNameFromLocal ?: "numfyx"
     }
 
     signingConfigs {
