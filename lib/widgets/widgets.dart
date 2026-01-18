@@ -1,4 +1,3 @@
-// Export all reusable widgets from a single location
 export 'buttons.dart';
 export 'cards.dart';
 export 'common_widgets.dart';

@@ -552,7 +552,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                           label: 'Open',
                                           textColor: Colors.white,
                                           onPressed: () async {
-                                            // Try OpenFilex first for local files, then fallback to url_launcher
                                             try {
                                               await OpenFilex.open(path);
                                               return;

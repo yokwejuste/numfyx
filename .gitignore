@@ -84,3 +84,4 @@ xcuserdata/
 # Web related
 /web/index.html.cache
 local.properties
+.claude/

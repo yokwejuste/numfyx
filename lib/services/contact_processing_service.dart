@@ -1,4 +1,5 @@
 import 'package:flutter_contacts/flutter_contacts.dart';
+
 import '../models/contact_result.dart';
 import 'phone_formatter_service.dart';
 
@@ -15,11 +16,9 @@ class ServicePreviewItem {
 class ProcessingResult {
   final List<ContactResult> results;
   final int totalProcessed;
-
   final int updated;
   final int skipped;
   final int failed;
-
   final int updatedContacts;
   final int skippedContacts;
 
@@ -36,12 +35,14 @@ class ProcessingResult {
 
 class ContactProcessingService {
   static Future<List<ServicePreviewItem>> computePreview(List<Contact> contacts, String region, {bool fastPreview = false, void Function(double)? onProgress}) async {
-    final items = <ServicePreviewItem>[];
-    final total = contacts.length;
+    final List<ServicePreviewItem> out = [];
     int processed = 0;
+    final total = contacts.length;
 
     for (final contact in contacts) {
-      final name = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
+      final String id = contact.id;
+      final String name = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
+
       if (contact.phones.isEmpty) {
         processed++;
         onProgress?.call(total > 0 ? processed / total : 1.0);
@@ -50,53 +51,50 @@ class ContactProcessingService {
 
       for (final phone in contact.phones) {
         final orig = phone.number.trim();
-        final normalized = orig.replaceAll(RegExp(r'\s+'), '');
+        String status = 'Will Fail';
+        String predicted = '';
 
         if (orig.isEmpty || orig.length < 4) {
-          items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: orig, status: 'Will Skip'));
-          continue;
-        }
-
-        if (normalized.startsWith('+') || normalized.startsWith('00')) {
-          if (!PhoneFormatterService.isNumberFromRegion(orig, region)) {
-            continue;
-          }
-          if (normalized.startsWith('+')) {
-            items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: orig, status: 'Will Skip'));
-          } else {
-            final without00 = normalized.substring(2);
-            items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: '+$without00', status: 'Will Update'));
-          }
-          continue;
-        }
-
-        final matches = PhoneFormatterService.matchesCountryStructure(orig, region);
-        if (!matches) {
-          items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: 'invalid structure', status: 'Will Fail'));
-          continue;
-        }
-
-        if (fastPreview) {
-          items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: 'will attempt E.164', status: 'Will Update'));
+          status = 'Will Skip';
+          predicted = orig;
         } else {
-          final formatted = await PhoneFormatterService.formatToE164(orig, region);
-          if (formatted != null && formatted != orig) {
-            items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: formatted, status: 'Will Update'));
+          final normalized = orig.replaceAll(RegExp(r'\s+'), '');
+
+          if (normalized.startsWith('+')) {
+            status = 'Will Skip';
+            predicted = orig;
+          } else if (normalized.startsWith('00')) {
+            final without00 = normalized.substring(2);
+            status = 'Will Update';
+            predicted = '+$without00';
           } else {
-            items.add(ServicePreviewItem(contactId: contact.id, contactName: name, original: orig, predicted: 'invalid', status: 'Will Fail'));
+            if (!PhoneFormatterService.isNumberFromRegion(orig, region)) {
+              continue;
+            }
+
+            final matches = PhoneFormatterService.matchesCountryStructure(orig, region);
+            if (!matches) {
+              status = 'Will Fail';
+              predicted = 'invalid structure';
+            } else {
+              status = 'Will Update';
+              predicted = 'will format to E.164';
+            }
           }
         }
+
+        out.add(ServicePreviewItem(contactId: id, contactName: name, original: orig, predicted: predicted, status: status));
       }
 
       processed++;
-      if (processed % 3 == 0) {
+      if (processed % 10 == 0) {
         onProgress?.call(total > 0 ? processed / total : 1.0);
-        await Future.delayed(const Duration(milliseconds: 1));
+        await Future.delayed(Duration(milliseconds: 1));
       }
     }
 
     onProgress?.call(1.0);
-    return items;
+    return out;
   }
 
   static Future<ProcessingResult> processContacts(List<Contact> contacts, String region, {Set<String>? skipSet, void Function(double)? onProgress, void Function(String)? onLog}) async {
@@ -106,13 +104,13 @@ class ContactProcessingService {
     int updated = 0;
     int skipped = 0;
     int failed = 0;
-
     int updatedContacts = 0;
     int skippedContacts = 0;
     int contactsWithPhones = 0;
 
     for (final contact in contacts) {
       final contactName = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
+
       if (contact.phones.isEmpty) {
         skipped++;
         skippedContacts++;
@@ -123,7 +121,6 @@ class ContactProcessingService {
       }
 
       contactsWithPhones++;
-
       bool contactModified = false;
       bool anyPhoneProcessed = false;
       bool anyPhoneUpdated = false;
@@ -204,7 +201,10 @@ class ContactProcessingService {
       }
 
       processed++;
-      if (processed % 3 == 0) onProgress?.call(totalContacts > 0 ? processed / totalContacts : 1.0);
+      if (processed % 3 == 0) {
+        onProgress?.call(totalContacts > 0 ? processed / totalContacts : 1.0);
+        await Future.delayed(Duration(milliseconds: 1));
+      }
     }
 
     onProgress?.call(1.0);

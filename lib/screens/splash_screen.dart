@@ -31,7 +31,6 @@ class _SplashScreenState extends State<SplashScreen>
       end: 1.0,
     ).animate(CurvedAnimation(parent: _fadeController, curve: Curves.easeIn));
 
-    // Show "Tap to continue" after animation completes
     Timer(const Duration(seconds: 2), () {
       if (mounted) {
         setState(() {

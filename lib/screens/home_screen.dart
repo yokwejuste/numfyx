@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -54,18 +55,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadRegion() async {
     final region = await SettingsService.getDefaultRegion();
-    setState(() {
-      _currentRegion = region;
-    });
+    setState(() => _currentRegion = region);
   }
 
   Future<void> _checkPermission() async {
     final status = await Permission.contacts.status;
     setState(() {
       _hasPermission = status.isGranted;
-      if (!_hasPermission) {
-        _statusMessage = 'Contacts permission required';
-      }
+      if (!_hasPermission) _statusMessage = 'Contacts permission required';
     });
   }
 
@@ -73,21 +70,42 @@ class _HomeScreenState extends State<HomeScreen> {
     final status = await Permission.contacts.request();
     setState(() {
       _hasPermission = status.isGranted;
-      if (_hasPermission) {
-        _statusMessage = 'Permission granted. Ready to format contacts';
-      } else {
-        _statusMessage = 'Permission denied. Cannot access contacts';
-      }
+      _statusMessage = _hasPermission
+          ? 'Permission granted. Ready to format contacts'
+          : 'Permission denied. Cannot access contacts';
     });
   }
 
   void _addLog(String message) {
     setState(() {
       _logMessages.add(message);
-      if (_logMessages.length > 50) {
-        _logMessages.removeAt(0);
-      }
+      if (_logMessages.length > 50) _logMessages.removeAt(0);
     });
+  }
+
+  void _showLoadingDialog() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(
+          width: 64,
+          height: 64,
+          child: CircularProgressIndicator(),
+        ),
+      ),
+    );
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Theme.of(context).colorScheme.primary,
+        duration: Duration(seconds: isError ? 3 : 5),
+      ),
+    );
   }
 
   Future<void> _previewAndConfirmProcessing() async {
@@ -96,32 +114,17 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return const Center(
-          child: SizedBox(
-            width: 64,
-            height: 64,
-            child: CircularProgressIndicator(),
-          ),
-        );
-      },
-    );
+    _showLoadingDialog();
 
-    List<Contact> contacts;
     try {
-      contacts = await FlutterContacts.getContacts(
+      final contacts = await FlutterContacts.getContacts(
         withProperties: true,
         withPhoto: false,
         withAccounts: false,
       );
 
-      final preview = await ContactProcessingService.computePreview(
-        contacts,
-        _currentRegion,
-      );
+      final preview = await ContactProcessingService.computePreview(contacts, _currentRegion);
+
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
 
@@ -134,32 +137,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+
       if (skip != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _processContacts(contacts, skip);
+          if (mounted) _processContacts(contacts, skip);
         });
       }
-      return;
     } catch (e) {
       if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      _addLog('Error loading/previewing contacts: ${e.toString()}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load/preview contacts: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
+      _addLog('Error loading/previewing contacts: $e');
+      _showSnackBar('Failed to load/preview contacts: $e', isError: true);
     }
   }
 
-  Future<void> _processContacts([
-    List<Contact>? contactsParam,
-    Set<String>? skipSet,
-  ]) async {
+  Future<void> _processContacts([List<Contact>? contactsParam, Set<String>? skipSet]) async {
     if (!_hasPermission) {
       await _requestPermission();
       return;
@@ -183,23 +174,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _addLog('Starting contact processing...');
     _addLog('Using region: $_currentRegion');
+
     try {
-      final contacts =
-          contactsParam ??
-          await FlutterContacts.getContacts(
-            withProperties: true,
-            withPhoto: true,
-            withAccounts: true,
-          );
+      final contacts = contactsParam ?? await FlutterContacts.getContacts(
+        withProperties: true,
+        withPhoto: true,
+        withAccounts: true,
+      );
 
       final result = await ContactProcessingService.processContacts(
         contacts,
         _currentRegion,
         skipSet: skipSet,
-        onProgress: (p) => setState(() {
-          _progress = p;
-        }),
-        onLog: (m) => _addLog(m),
+        onProgress: (p) => setState(() => _progress = p),
+        onLog: _addLog,
       );
 
       setState(() {
@@ -213,22 +201,18 @@ class _HomeScreenState extends State<HomeScreen> {
         _updatedNumbers = result.updatedContacts;
         _skippedNumbers = result.skippedContacts;
         _failedNumbers = result.failed;
-        _contactsWithoutPhones = result.results
-            .where(
-              (r) => r.originalNumber.isEmpty && r.status.contains('no phones'),
-            )
-            .length;
+        _contactsWithoutPhones = result.results.where((r) => r.originalNumber.isEmpty && r.status.contains('no phones')).length;
       });
 
       HomeScreen.lastResults = List.from(_results);
       _addLog('Processing complete. Generate report from Settings.');
     } catch (e) {
       setState(() {
-        _statusMessage = 'Error: ${e.toString()}';
+        _statusMessage = 'Error: $e';
         _isProcessing = false;
       });
-      _addLog('Error: ${e.toString()}');
-      debugPrint('\nERROR: ${e.toString()}');
+      _addLog('Error: $e');
+      debugPrint('\nERROR: $e');
     }
   }
 
@@ -247,203 +231,112 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  Future<void> _downloadReportFromHome() async {
+  Future<void> _handleExport(Future<String?> Function() exportFunction, String fileType) async {
     if (_results.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'No processing results available. Process contacts first.',
-            ),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
+      _showSnackBar('No processing results available. Process contacts first.');
       return;
     }
 
-    setState(() {
-      _isGenerating = true;
-    });
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: SizedBox(
-          width: 64,
-          height: 64,
-          child: CircularProgressIndicator(),
+    setState(() => _isGenerating = true);
+    _showLoadingDialog();
+
+    String? path;
+    try {
+      path = await exportFunction();
+    } catch (e) {
+      _addLog('Failed to generate $fileType: $e');
+      _showSnackBar('Failed to generate $fileType: $e', isError: true);
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _isGenerating = false);
+    }
+
+    if (path == null) {
+      _showSnackBar('Failed to generate $fileType', isError: true);
+      return;
+    }
+
+    final savedPath = path;
+    _addLog('$fileType saved to $savedPath');
+
+    final file = File(savedPath);
+    if (!await file.exists()) {
+      _addLog('Saved file not found at $savedPath');
+      _showSnackBar('$fileType saved but file not found on disk', isError: true);
+      return;
+    }
+
+    final fileName = savedPath.split('/').last;
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$fileType saved: $fileName'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: 'Open',
+          textColor: Colors.white,
+          onPressed: () => _openFile(savedPath),
         ),
       ),
     );
 
-    String? path;
-    try {
-      path = await ExcelService.exportResults(
-        _results,
-        forcePdf: true,
-        onlyIncludeUpdated: true,
-      );
-      debugPrint('exportResults returned path: $path');
-    } catch (e) {
-      setState(() {
-        _isGenerating = false;
-      });
-      _addLog('Failed to generate report: ${e.toString()}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to generate report: ${e.toString()}'),
-            backgroundColor: Colors.red,
+    _showExportDialog(savedPath, fileName, fileType);
+  }
+
+  Future<void> _showExportDialog(String path, String fileName, String fileType) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$fileType saved'),
+        content: Text('$fileName\n\nSaved to:\n$path'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
           ),
-        );
-      }
-      return;
-    } finally {
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      setState(() {
-        _isGenerating = false;
-      });
-    }
-
-    if (path != null) {
-      final savedPath = path;
-      _addLog('Report saved to $savedPath');
-      try {
-        final savedFile = File(savedPath);
-        final exists = await savedFile.exists();
-        if (!exists) {
-          _addLog('Saved file not found at $savedPath');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Report saved but file not found on disk'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          } else {
-            _addLog('Cannot show SnackBar: widget not mounted');
-          }
-          return;
-        }
-      } catch (e) {
-        debugPrint('Error checking saved file existence: $e');
-      }
-
-      if (!mounted) {
-        _addLog(
-          'Report saved: ${savedPath.split('/').last} (widget not mounted, cannot show SnackBar)',
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Report saved: ${savedPath.split('/').last}'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Open',
-              textColor: Colors.white,
-              onPressed: () {
-                _openFile(savedPath);
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _openFile(path);
+            },
+            child: const Text('Open'),
+          ),
+          if (fileType == 'Report')
+            TextButton(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                try {
+                  await Share.shareXFiles([XFile(path)], text: 'NumFyx report');
+                } catch (_) {
+                  try {
+                    await Share.share('Report: $path');
+                  } catch (_) {}
+                }
               },
+              child: const Text('Share'),
             ),
-          ),
-        );
-      }
-      try {
-        if (!mounted) return;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('Report saved'),
-              content: Text(
-                '${savedPath.split('/').last}\n\nSaved to:\n$savedPath',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Close'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _openFile(savedPath);
-                  },
-                  child: const Text('Open'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    Navigator.of(ctx).pop();
-                    try {
-                      await Share.shareXFiles([
-                        XFile(savedPath),
-                      ], text: 'NumFyx report');
-                    } catch (e) {
-                      try {
-                        await Share.share('Report: $savedPath');
-                      } catch (_) {}
-                    }
-                  },
-                  child: const Text('Share'),
-                ),
-              ],
-            );
-          },
-        );
-      } catch (_) {}
-    } else {
-      if (!mounted) {
-        _addLog('Failed to generate PDF report (widget not mounted)');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to generate PDF report'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    }
+        ],
+      ),
+    );
   }
 
   Future<void> _openFile(String filePath) async {
     try {
-      try {
-        final res = await OpenFilex.open(filePath);
-        debugPrint('OpenFilex result: $res');
-        return;
-      } catch (e) {
-        debugPrint('OpenFilex failed: $e; falling back to launchUrl');
-      }
-
+      await OpenFilex.open(filePath);
+    } catch (_) {
       final uri = Uri.file(filePath);
       if (await canLaunchUrl(uri)) {
         try {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
           return;
-        } catch (e) {
-          debugPrint('launchUrl failed: $e');
-        }
+        } catch (_) {}
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to open file'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Unable to open file: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnackBar('Unable to open file', isError: true);
     }
   }
 
@@ -474,11 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
-                  child: Image.asset(
-                    'assets/logo/logo_96.png',
-                    width: 32,
-                    height: 32,
-                  ),
+                  child: Image.asset('assets/logo/logo_96.png', width: 32, height: 32),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -495,10 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       Text(
                         'Region: $_currentRegion',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: theme.colorScheme.secondary,
-                        ),
+                        style: TextStyle(fontSize: 13, color: theme.colorScheme.secondary),
                       ),
                     ],
                   ),
@@ -506,7 +392,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 24),
-
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -542,7 +427,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 20),
-
             if (_isProcessing) ...[
               Container(
                 padding: const EdgeInsets.all(20),
@@ -563,16 +447,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             height: 80,
                             child: CircularProgressIndicator(
                               strokeWidth: 3,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                theme.colorScheme.primary,
-                              ),
+                              valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
                             ),
                           ),
-                          Icon(
-                            Icons.phone_android,
-                            size: 36,
-                            color: theme.colorScheme.primary,
-                          ),
+                          Icon(Icons.phone_android, size: 36, color: theme.colorScheme.primary),
                         ],
                       ),
                     ),
@@ -581,12 +459,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(8),
                       child: LinearProgressIndicator(
                         value: _progress,
-                        backgroundColor: isDark
-                            ? Colors.grey[800]
-                            : Colors.grey[200],
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          theme.colorScheme.primary,
-                        ),
+                        backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                        valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
                         minHeight: 8,
                       ),
                     ),
@@ -604,7 +478,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
             ],
-
             if (_totalContacts > 0) ...[
               Container(
                 padding: const EdgeInsets.all(16),
@@ -631,22 +504,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    _buildStatRow('Contacts', _totalContacts.toString(), theme),
-                    _buildStatRow(
-                      'Without Phones',
-                      _contactsWithoutPhones.toString(),
-                      theme,
-                    ),
-                    _buildStatRow('Scanned', _scannedNumbers.toString(), theme),
-                    _buildStatRow('Updated', _updatedNumbers.toString(), theme),
-                    _buildStatRow('Skipped', _skippedNumbers.toString(), theme),
-                    _buildStatRow('Failed', _failedNumbers.toString(), theme),
+                    ...[
+                      ('Contacts', _totalContacts),
+                      ('Without Phones', _contactsWithoutPhones),
+                      ('Scanned', _scannedNumbers),
+                      ('Updated', _updatedNumbers),
+                      ('Skipped', _skippedNumbers),
+                      ('Failed', _failedNumbers),
+                    ].map((e) => _buildStatRow(e.$1, e.$2.toString(), theme)),
                   ],
                 ),
               ),
               const SizedBox(height: 20),
             ],
-
             if (_logMessages.isNotEmpty) ...[
               Text(
                 'Activity Log',
@@ -666,27 +536,24 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: ListView.builder(
                     itemCount: _logMessages.length,
-                    itemBuilder: (context, index) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        child: Text(
-                          _logMessages[index],
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: theme.colorScheme.secondary,
-                            fontFamily: 'monospace',
-                            height: 1.4,
-                          ),
+                    itemBuilder: (context, index) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(
+                        _logMessages[index],
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.secondary,
+                          fontFamily: 'monospace',
+                          height: 1.4,
                         ),
-                      );
-                    },
+                      ),
+                    ),
                   ),
                 ),
               ),
               const SizedBox(height: 20),
             ] else if (!_isProcessing)
               const Spacer(),
-
             if (!_hasPermission)
               PrimaryButton(
                 onPressed: _isProcessing ? null : _requestPermission,
@@ -700,7 +567,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: _isProcessing ? 'Processing...' : 'Start Formatting',
                 isLoading: _isProcessing,
               ),
-
             if (_totalContacts > 0 && !_isProcessing) ...[
               const SizedBox(height: 12),
               SecondaryButton(
@@ -713,7 +579,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isGenerating ? null : _downloadReportFromHome,
+                      onPressed: _isGenerating ? null : () => _handleExport(
+                        () => ExcelService.exportResults(_results, forcePdf: true, onlyIncludeUpdated: true),
+                        'Report',
+                      ),
                       icon: const Icon(Icons.download, size: 18),
                       label: const Text('Download Report'),
                       style: ElevatedButton.styleFrom(
@@ -724,7 +593,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isGenerating ? null : _exportCsvFromHome,
+                      onPressed: _isGenerating ? null : () => _handleExport(
+                        () => ExcelService.exportCsv(_results),
+                        'CSV',
+                      ),
                       icon: const Icon(Icons.table_chart, size: 18),
                       label: const Text('Export as CSV'),
                       style: ElevatedButton.styleFrom(
@@ -748,16 +620,11 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 13, color: theme.colorScheme.secondary),
-          ),
+          Text(label, style: TextStyle(fontSize: 13, color: theme.colorScheme.secondary)),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
-              color: theme.brightness == Brightness.dark
-                  ? Colors.grey[850]
-                  : Colors.grey[200],
+              color: theme.brightness == Brightness.dark ? Colors.grey[850] : Colors.grey[200],
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
@@ -772,150 +639,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-  }
-
-  Future<void> _exportCsvFromHome() async {
-    if (_results.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'No processing results available. Process contacts first.',
-            ),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-      return;
-    }
-
-    setState(() {
-      _isGenerating = true;
-    });
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: SizedBox(
-          width: 64,
-          height: 64,
-          child: CircularProgressIndicator(),
-        ),
-      ),
-    );
-
-    String? path;
-    try {
-      path = await ExcelService.exportCsv(_results);
-      debugPrint('exportCsv returned path: $path');
-    } catch (e) {
-      setState(() {
-        _isGenerating = false;
-      });
-      _addLog('Failed to generate CSV: ${e.toString()}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to generate CSV: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    } finally {
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
-      setState(() {
-        _isGenerating = false;
-      });
-    }
-
-    if (path != null) {
-      final savedPath = path;
-      _addLog('CSV exported to $savedPath');
-      try {
-        final savedFile = File(savedPath);
-        final exists = await savedFile.exists();
-        if (!exists) {
-          _addLog('Saved CSV file not found at $savedPath');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('CSV exported but file not found on disk'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          } else {
-            _addLog('Cannot show SnackBar: widget not mounted');
-          }
-          return;
-        }
-      } catch (e) {
-        debugPrint('Error checking saved CSV file existence: $e');
-      }
-
-      if (!mounted) {
-        _addLog(
-          'CSV exported: ${savedPath.split('/').last} (widget not mounted, cannot show SnackBar)',
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('CSV exported: ${savedPath.split('/').last}'),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Open',
-              textColor: Colors.white,
-              onPressed: () {
-                _openFile(savedPath);
-              },
-            ),
-          ),
-        );
-      }
-      try {
-        if (!mounted) return;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              title: const Text('CSV exported'),
-              content: Text(
-                '${savedPath.split('/').last}\n\nSaved to:\n$savedPath',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Close'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(ctx).pop();
-                    _openFile(savedPath);
-                  },
-                  child: const Text('Open'),
-                ),
-              ],
-            );
-          },
-        );
-      } catch (_) {}
-    } else {
-      if (!mounted) {
-        _addLog('Failed to generate CSV (widget not mounted)');
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to generate CSV'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    }
   }
 }
 
@@ -969,22 +692,16 @@ class _PreviewScreenState extends State<_PreviewScreen> {
   }
 
   Future<void> _computePreview() async {
-    final contacts = widget.contacts;
-    final totalContacts = contacts.length;
-    int processed = 0;
-
     if (widget.servicePreview != null) {
       for (final sp in widget.servicePreview!) {
-        _items.add(
-          _PreviewItem(
-            contactId: sp.contactId,
-            contactName: sp.contactName,
-            original: sp.original,
-            predicted: sp.predicted,
-            status: sp.status,
-            selected: sp.status == 'Will Update',
-          ),
-        );
+        _items.add(_PreviewItem(
+          contactId: sp.contactId,
+          contactName: sp.contactName,
+          original: sp.original,
+          predicted: sp.predicted,
+          status: sp.status,
+          selected: sp.status == 'Will Update',
+        ));
       }
       setState(() {
         _progress = 1.0;
@@ -993,16 +710,17 @@ class _PreviewScreenState extends State<_PreviewScreen> {
       return;
     }
 
+    final contacts = widget.contacts;
+    final totalContacts = contacts.length;
+    int processed = 0;
+
     for (final contact in contacts) {
       if (!mounted) return;
-      final name = contact.displayName.isNotEmpty
-          ? contact.displayName
-          : 'Unknown';
+      final name = contact.displayName.isNotEmpty ? contact.displayName : 'Unknown';
+
       if (contact.phones.isEmpty) {
         processed++;
-        setState(() {
-          _progress = processed / totalContacts;
-        });
+        setState(() => _progress = processed / totalContacts);
         continue;
       }
 
@@ -1016,64 +734,48 @@ class _PreviewScreenState extends State<_PreviewScreen> {
           status = 'Will Skip';
           predicted = orig;
         } else if (normalized.startsWith('+') || normalized.startsWith('00')) {
-          if (!PhoneFormatterService.isNumberFromRegion(orig, widget.region)) {
-            continue;
-          }
+          if (!PhoneFormatterService.isNumberFromRegion(orig, widget.region)) continue;
 
           if (normalized.startsWith('+')) {
             status = 'Will Skip';
             predicted = orig;
           } else {
-            final without00 = normalized.substring(2);
             status = 'Will Update';
-            predicted = '+$without00';
+            predicted = '+${normalized.substring(2)}';
           }
         } else {
-          final matches = PhoneFormatterService.matchesCountryStructure(
-            orig,
-            widget.region,
-          );
+          final matches = PhoneFormatterService.matchesCountryStructure(orig, widget.region);
           if (!matches) {
             status = 'Will Fail';
             predicted = 'invalid structure';
+          } else if (_fastPreview) {
+            status = 'Will Update';
+            predicted = 'will attempt E.164';
           } else {
-            if (_fastPreview) {
+            final formatted = await PhoneFormatterService.formatToE164(orig, widget.region);
+            if (formatted != null && formatted != orig) {
               status = 'Will Update';
-              predicted = 'will attempt E.164';
+              predicted = formatted;
             } else {
-              final formatted = await PhoneFormatterService.formatToE164(
-                orig,
-                widget.region,
-              );
-              if (formatted != null && formatted != orig) {
-                status = 'Will Update';
-                predicted = formatted;
-              } else {
-                status = 'Will Fail';
-                predicted = 'invalid';
-              }
+              status = 'Will Fail';
+              predicted = 'invalid';
             }
           }
         }
 
-        final cid = contact.id;
-        _items.add(
-          _PreviewItem(
-            contactId: cid,
-            contactName: name,
-            original: orig,
-            predicted: predicted,
-            status: status,
-            selected: status == 'Will Update',
-          ),
-        );
+        _items.add(_PreviewItem(
+          contactId: contact.id,
+          contactName: name,
+          original: orig,
+          predicted: predicted,
+          status: status,
+          selected: status == 'Will Update',
+        ));
       }
 
       processed++;
       if (processed % 5 == 0) {
-        setState(() {
-          _progress = processed / totalContacts;
-        });
+        setState(() => _progress = processed / totalContacts);
         await Future.delayed(Duration(milliseconds: 1));
       }
     }
@@ -1092,13 +794,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     }
     if (_search.trim().isNotEmpty) {
       final q = _search.toLowerCase();
-      list = list
-          .where(
-            (i) =>
-                i.contactName.toLowerCase().contains(q) ||
-                i.original.toLowerCase().contains(q),
-          )
-          .toList();
+      list = list.where((i) => i.contactName.toLowerCase().contains(q) || i.original.toLowerCase().contains(q)).toList();
     }
     return list;
   }
@@ -1109,9 +805,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
     final start = _page * _pageSize;
     final end = (_page + 1) * _pageSize;
     final pageItems = _filteredItems.skip(start).take(_pageSize).toList();
-
-    final allFilteredSelected =
-        _filteredItems.isNotEmpty && _filteredItems.every((i) => i.selected);
+    final allFilteredSelected = _filteredItems.isNotEmpty && _filteredItems.every((i) => i.selected);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Preview Changes')),
@@ -1121,21 +815,11 @@ class _PreviewScreenState extends State<_PreviewScreen> {
           children: [
             Row(
               children: [
-                Expanded(
-                  child: Text('Items: ${_items.length}  Filter: $_filter'),
-                ),
+                Expanded(child: Text('Items: ${_items.length}  Filter: $_filter')),
                 if (_isWorking)
-                  SizedBox(
-                    width: 160,
-                    child: LinearProgressIndicator(value: _progress),
-                  )
+                  SizedBox(width: 160, child: LinearProgressIndicator(value: _progress))
                 else
-                  Text(
-                    'Ready',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
+                  Text('Ready', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
               ],
             ),
             const SizedBox(height: 8),
@@ -1161,10 +845,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                     decoration: const InputDecoration(
                       hintText: 'Search name or number',
                       isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
                     onChanged: (v) => setState(() {
                       _search = v;
@@ -1173,9 +854,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  'Page: ${_page + 1} / ${(_filteredItems.length / _pageSize).ceil().clamp(1, 999999)}',
-                ),
+                Text('Page: ${_page + 1} / ${(_filteredItems.length / _pageSize).ceil().clamp(1, 999999)}'),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.chevron_left),
@@ -1191,26 +870,20 @@ class _PreviewScreenState extends State<_PreviewScreen> {
             Row(
               children: [
                 TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final it in _filteredItems) {
-                        it.selected = !allFilteredSelected;
-                      }
-                    });
-                  },
-                  child: Text(
-                    allFilteredSelected ? 'Unselect All' : 'Select All',
-                  ),
+                  onPressed: () => setState(() {
+                    for (final it in _filteredItems) {
+                      it.selected = !allFilteredSelected;
+                    }
+                  }),
+                  child: Text(allFilteredSelected ? 'Unselect All' : 'Select All'),
                 ),
                 const SizedBox(width: 8),
                 TextButton(
-                  onPressed: () {
-                    setState(() {
-                      for (final it in _filteredItems) {
-                        it.selected = false;
-                      }
-                    });
-                  },
+                  onPressed: () => setState(() {
+                    for (final it in _filteredItems) {
+                      it.selected = false;
+                    }
+                  }),
                   child: const Text('Clear Selection'),
                 ),
                 const Spacer(),
@@ -1219,15 +892,13 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                     const Text('Fast preview'),
                     Switch(
                       value: _fastPreview,
-                      onChanged: (v) {
-                        setState(() {
-                          _fastPreview = v;
-                          _items.clear();
-                          _isWorking = true;
-                          _progress = 0.0;
-                          _computePreview();
-                        });
-                      },
+                      onChanged: (v) => setState(() {
+                        _fastPreview = v;
+                        _items.clear();
+                        _isWorking = true;
+                        _progress = 0.0;
+                        _computePreview();
+                      }),
                     ),
                   ],
                 ),
@@ -1236,22 +907,14 @@ class _PreviewScreenState extends State<_PreviewScreen> {
             const SizedBox(height: 8),
             Expanded(
               child: pageItems.isEmpty
-                  ? Center(
-                      child: Text(
-                        _isWorking ? 'Computing preview...' : 'No items',
-                      ),
-                    )
+                  ? Center(child: Text(_isWorking ? 'Computing preview...' : 'No items'))
                   : ListView.builder(
                       itemCount: pageItems.length,
                       itemBuilder: (context, idx) {
                         final it = pageItems[idx];
                         return CheckboxListTile(
                           value: it.selected,
-                          onChanged: (v) {
-                            setState(() {
-                              it.selected = v ?? false;
-                            });
-                          },
+                          onChanged: (v) => setState(() => it.selected = v ?? false),
                           title: Text(it.contactName),
                           subtitle: Text('${it.original} -> ${it.predicted}'),
                           secondary: Text(
@@ -1259,9 +922,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                             style: TextStyle(
                               color: it.status == 'Will Update'
                                   ? Colors.green
-                                  : (it.status == 'Will Fail'
-                                        ? Colors.red
-                                        : Colors.grey),
+                                  : (it.status == 'Will Fail' ? Colors.red : Colors.grey),
                             ),
                           ),
                         );
@@ -1287,9 +948,7 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                       : () {
                           final skip = <String>{};
                           for (final it in _items) {
-                            if (!it.selected) {
-                              skip.add('${it.contactId}|${it.original}');
-                            }
+                            if (!it.selected) skip.add('${it.contactId}|${it.original}');
                           }
                           final navigator = Navigator.of(context);
                           WidgetsBinding.instance.addPostFrameCallback((_) {
