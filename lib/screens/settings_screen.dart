@@ -1013,7 +1013,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '• Offline contact formatter\n• E.164 international format\n• No data collection\n• Version 1.0.0',
+                    '• Offline contact formatter\n• E.164 international format\n• No data collection\n• Version 1.2.4',
                     style: TextStyle(
                       fontSize: 12,
                       color: theme.colorScheme.secondary,
