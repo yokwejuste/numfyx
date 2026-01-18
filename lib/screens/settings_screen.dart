@@ -5,7 +5,8 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../services/excel_service.dart';
+import '../services/csv_export_service.dart';
+import '../services/pdf_export_service.dart';
 import '../services/settings_service.dart';
 import '../services/theme_service.dart';
 import '../widgets/common_widgets.dart';
@@ -142,9 +143,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final theme = Theme.of(context);
     final navigator = Navigator.of(context, rootNavigator: true);
 
-    final path = await ExcelService.exportResults(
+    final path = await PdfExportService.exportToPdf(
       HomeScreen.lastResults,
-      forcePdf: true,
       onlyIncludeUpdated: true,
     );
 
@@ -155,11 +155,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (!mounted) return;
     if (path != null) {
-      final isPdf = path.toLowerCase().endsWith('.pdf');
-      final label = isPdf ? 'PDF saved' : 'CSV saved';
       messenger.showSnackBar(
         SnackBar(
-          content: Text('$label: ${path.split('/').last}'),
+          content: Text('PDF saved: ${path.split('/').last}'),
           backgroundColor: theme.colorScheme.primary,
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
@@ -249,7 +247,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final themeService = Provider.of<ThemeService>(context);
 
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -529,7 +527,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       ),
                                     ),
                                   );
-                                  final path = await ExcelService.exportCsv(
+                                  final path = await CsvExportService.exportToCsv(
                                     HomeScreen.lastResults,
                                   );
                                   if (mounted) {
@@ -711,7 +709,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
-            const Spacer(),
+            const SizedBox(height: 20),
 
             Container(
               padding: const EdgeInsets.all(16),

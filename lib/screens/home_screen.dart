@@ -10,7 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/contact_result.dart';
 import '../services/contact_processing_service.dart';
-import '../services/excel_service.dart';
+import '../services/csv_export_service.dart';
+import '../services/pdf_export_service.dart';
 import '../services/phone_formatter_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/buttons.dart';
@@ -346,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final isDark = theme.brightness == Brightness.dark;
 
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -527,25 +528,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1A1A1A) : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ListView.builder(
-                    itemCount: _logMessages.length,
-                    itemBuilder: (context, index) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: Text(
-                        _logMessages[index],
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.secondary,
-                          fontFamily: 'monospace',
-                          height: 1.4,
-                        ),
+              Container(
+                height: 200,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1A1A1A) : Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: ListView.builder(
+                  itemCount: _logMessages.length,
+                  itemBuilder: (context, index) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Text(
+                      _logMessages[index],
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: theme.colorScheme.secondary,
+                        fontFamily: 'monospace',
+                        height: 1.4,
                       ),
                     ),
                   ),
@@ -553,7 +553,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
             ] else if (!_isProcessing)
-              const Spacer(),
+              const SizedBox(height: 20),
             if (!_hasPermission)
               PrimaryButton(
                 onPressed: _isProcessing ? null : _requestPermission,
@@ -580,7 +580,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: _isGenerating ? null : () => _handleExport(
-                        () => ExcelService.exportResults(_results, forcePdf: true, onlyIncludeUpdated: true),
+                        () => PdfExportService.exportToPdf(_results, onlyIncludeUpdated: true),
                         'Report',
                       ),
                       icon: const Icon(Icons.download, size: 18),
@@ -594,7 +594,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: ElevatedButton.icon(
                       onPressed: _isGenerating ? null : () => _handleExport(
-                        () => ExcelService.exportCsv(_results),
+                        () => CsvExportService.exportToCsv(_results),
                         'CSV',
                       ),
                       icon: const Icon(Icons.table_chart, size: 18),
@@ -838,12 +838,11 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                     });
                   },
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 200,
+                const SizedBox(width: 8),
+                Expanded(
                   child: TextField(
                     decoration: const InputDecoration(
-                      hintText: 'Search name or number',
+                      hintText: 'Search',
                       isDense: true,
                       contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     ),
@@ -853,7 +852,11 @@ class _PreviewScreenState extends State<_PreviewScreen> {
                     }),
                   ),
                 ),
-                const SizedBox(width: 12),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
                 Text('Page: ${_page + 1} / ${(_filteredItems.length / _pageSize).ceil().clamp(1, 999999)}'),
                 const Spacer(),
                 IconButton(
