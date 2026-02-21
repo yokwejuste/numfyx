@@ -1,6 +1,6 @@
 name: numfyx
 description: "Internationalize your phone number with a few clicks"
-version: 1.2.4+1
+version: 1.2.10+1
 
 environment:
   sdk: ^3.10.4
